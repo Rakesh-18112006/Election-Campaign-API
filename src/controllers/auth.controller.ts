@@ -14,10 +14,12 @@ import { AppError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { env } from '../config/env';
 
+// Cross-domain (prod): sameSite=none+secure so browser sends cookie to API subdomain.
+// Local dev: sameSite=lax is fine (same origin via Vite proxy).
 const COOKIE_OPTS = {
   httpOnly: true,
   secure: !env.isDev,
-  sameSite: 'lax' as const,
+  sameSite: (env.isDev ? 'lax' : 'none') as 'lax' | 'none',
   maxAge: 7 * 24 * 60 * 60 * 1000,
 };
 
