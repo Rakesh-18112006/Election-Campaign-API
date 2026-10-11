@@ -1,0 +1,138 @@
+import '../config/env';
+import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
+import { connectDatabase } from '../config/database';
+import { User } from '../models/User';
+import { Campaign } from '../models/Campaign';
+import { GeographicArea } from '../models/GeographicArea';
+import { VoterRecord } from '../models/VoterRecord';
+
+async function seed() {
+  await connectDatabase();
+
+  const existingAdmin = await User.findOne({ role: 'MAIN_ADMIN' });
+  if (existingAdmin) {
+    console.log('Seed data already exists. Skipping...');
+    await mongoose.disconnect();
+    return;
+  }
+
+  console.log('Seeding database...');
+
+  const adminHash = await bcrypt.hash('Admin@123', 12);
+  const admin = await User.create({
+    name: 'Main Administrator',
+    username: 'admin',
+    passwordHash: adminHash,
+    role: 'MAIN_ADMIN',
+    status: 'active',
+    mustChangePassword: false,
+  });
+
+  const mayorHash = await bcrypt.hash('Mayor@123', 12);
+  const mayor = await User.create({
+    name: 'Rajesh Kumar',
+    username: 'mayor_rajesh',
+    passwordHash: mayorHash,
+    role: 'MAYOR',
+    status: 'active',
+    parentUserId: admin._id,
+    createdBy: admin._id,
+    mustChangePassword: false,
+  });
+
+  const campaign = await Campaign.create({
+    name: 'Municipal Election 2026',
+    description: 'Municipal Corporation election campaign for 2026',
+    status: 'active',
+    startDate: new Date('2026-01-01'),
+    endDate: new Date('2026-12-31'),
+    createdBy: admin._id,
+  });
+
+  const ward1 = await GeographicArea.create({
+    name: 'Ward 1 - North Zone',
+    areaType: 'ward',
+    campaignId: campaign._id,
+    managerIds: [mayor._id],
+  });
+
+  const ward2 = await GeographicArea.create({
+    name: 'Ward 2 - South Zone',
+    areaType: 'ward',
+    campaignId: campaign._id,
+    managerIds: [mayor._id],
+  });
+
+  const supervisorHash = await bcrypt.hash('Supervisor@123', 12);
+  const supervisor = await User.create({
+    name: 'Priya Sharma',
+    username: 'supervisor_priya',
+    passwordHash: supervisorHash,
+    role: 'WARD_SUPERVISOR',
+    status: 'active',
+    parentUserId: mayor._id,
+    createdBy: admin._id,
+    assignedScopeIds: [ward1._id],
+    mustChangePassword: false,
+  });
+
+  const memberHash = await bcrypt.hash('Member@123', 12);
+  const member1 = await User.create({
+    name: 'Amit Patel',
+    username: 'member_amit',
+    passwordHash: memberHash,
+    role: 'WARD_MEMBER',
+    status: 'active',
+    parentUserId: supervisor._id,
+    createdBy: admin._id,
+    assignedScopeIds: [ward1._id],
+    mustChangePassword: false,
+  });
+
+  const member2 = await User.create({
+    name: 'Sunita Devi',
+    username: 'member_sunita',
+    passwordHash: memberHash,
+    role: 'WARD_MEMBER',
+    status: 'active',
+    parentUserId: supervisor._id,
+    createdBy: admin._id,
+    assignedScopeIds: [ward2._id],
+    mustChangePassword: false,
+  });
+
+  const sampleVoters = [
+    { name: 'Ravi Shankar', houseNumber: 'A-101', address: 'North Street', phone: '9876543210' },
+    { name: 'Meena Kumari', houseNumber: 'A-102', address: 'North Street', phone: '9876543211' },
+    { name: 'Suresh Babu', houseNumber: 'B-201', address: 'Lake View Road', phone: '9876543212' },
+    { name: 'Lakshmi Devi', houseNumber: 'B-202', address: 'Lake View Road', phone: '9876543213' },
+    { name: 'Vijay Kumar', houseNumber: 'C-301', address: 'Garden Colony', phone: '9876543214' },
+  ];
+
+  for (const v of sampleVoters) {
+    await VoterRecord.create({
+      campaignId: campaign._id,
+      geographicAreaId: ward1._id,
+      name: v.name,
+      houseNumber: v.houseNumber,
+      address: v.address,
+      phone: v.phone,
+      recordStatus: 'unassigned',
+    });
+  }
+
+  console.log('\n✅ Seed complete! Login credentials:');
+  console.log('  Admin:      admin / Admin@123');
+  console.log('  Mayor:      mayor_rajesh / Mayor@123');
+  console.log('  Supervisor: supervisor_priya / Supervisor@123');
+  console.log('  Member:     member_amit / Member@123');
+  console.log('  Member:     member_sunita / Member@123');
+
+  await mongoose.disconnect();
+}
+
+seed().catch((err) => {
+  console.error('Seed failed:', err);
+  process.exit(1);
+});
