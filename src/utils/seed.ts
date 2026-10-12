@@ -11,11 +11,23 @@ import { VoterRecord } from '../models/VoterRecord';
 async function seed() {
   await connectDatabase();
 
+  const force = process.argv.includes('--force');
   const existingAdmin = await User.findOne({ role: 'MAIN_ADMIN' });
   if (existingAdmin) {
-    console.log('Seed data already exists. Skipping...');
-    await mongoose.disconnect();
-    return;
+    if (!force) {
+      console.log('Seed data already exists. Use --force to re-seed (clears all data).');
+      await mongoose.disconnect();
+      return;
+    }
+    console.log('Force flag detected. Clearing existing data...');
+    await Promise.all([
+      User.deleteMany({}),
+      Party.deleteMany({}),
+      Campaign.deleteMany({}),
+      GeographicArea.deleteMany({}),
+      VoterRecord.deleteMany({}),
+    ]);
+    console.log('Existing data cleared.');
   }
 
   console.log('Seeding database...');
