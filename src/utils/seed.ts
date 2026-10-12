@@ -8,6 +8,7 @@ import { Campaign } from '../models/Campaign';
 import { GeographicArea } from '../models/GeographicArea';
 import { VoterRecord } from '../models/VoterRecord';
 import { AuditLog } from '../models/AuditLog';
+import { RefreshToken } from '../models/RefreshToken';
 
 async function seed() {
   await connectDatabase();
@@ -28,6 +29,7 @@ async function seed() {
       GeographicArea.deleteMany({}),
       VoterRecord.deleteMany({}),
       AuditLog.deleteMany({}),
+      RefreshToken.deleteMany({}),
     ]);
     console.log('Existing data cleared.');
   }
