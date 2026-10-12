@@ -54,8 +54,12 @@ export async function submitVisit(req: AuthRequest, res: Response, next: NextFun
       correctionReason,
     });
 
-    if (status !== 'correction') {
-      record.recordStatus = status;
+    if (status === 'visited') {
+      record.recordStatus = 'visited';
+      record.visitCount = (record.visitCount || 0) + 1;
+      await record.save();
+    } else if (status === 'not_visited') {
+      record.recordStatus = 'not_visited';
       await record.save();
     }
 

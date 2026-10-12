@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { connectDatabase } from '../config/database';
 import { User } from '../models/User';
+import { Party } from '../models/Party';
 import { Campaign } from '../models/Campaign';
 import { GeographicArea } from '../models/GeographicArea';
 import { VoterRecord } from '../models/VoterRecord';
@@ -29,6 +30,14 @@ async function seed() {
     mustChangePassword: false,
   });
 
+  // Create a demo party
+  const party = await Party.create({
+    name: 'Municipal Progressive Party',
+    description: 'Demo party for Municipal Election 2026',
+    createdBy: admin._id,
+    status: 'active',
+  });
+
   const mayorHash = await bcrypt.hash('Mayor@123', 12);
   const mayor = await User.create({
     name: 'Rajesh Kumar',
@@ -36,10 +45,14 @@ async function seed() {
     passwordHash: mayorHash,
     role: 'MAYOR',
     status: 'active',
+    partyId: party._id,
     parentUserId: admin._id,
     createdBy: admin._id,
     mustChangePassword: false,
   });
+
+  party.adminUserId = mayor._id;
+  await party.save();
 
   const campaign = await Campaign.create({
     name: 'Municipal Election 2026',
@@ -47,13 +60,15 @@ async function seed() {
     status: 'active',
     startDate: new Date('2026-01-01'),
     endDate: new Date('2026-12-31'),
-    createdBy: admin._id,
+    createdBy: mayor._id,
+    partyId: party._id,
   });
 
   const ward1 = await GeographicArea.create({
     name: 'Ward 1 - North Zone',
     areaType: 'ward',
     campaignId: campaign._id,
+    partyId: party._id,
     managerIds: [mayor._id],
   });
 
@@ -61,18 +76,34 @@ async function seed() {
     name: 'Ward 2 - South Zone',
     areaType: 'ward',
     campaignId: campaign._id,
+    partyId: party._id,
     managerIds: [mayor._id],
   });
 
-  const supervisorHash = await bcrypt.hash('Supervisor@123', 12);
-  const supervisor = await User.create({
+  const corporatorHash = await bcrypt.hash('Corporator@123', 12);
+  const corporator = await User.create({
     name: 'Priya Sharma',
-    username: 'supervisor_priya',
-    passwordHash: supervisorHash,
-    role: 'WARD_SUPERVISOR',
+    username: 'corporator_priya',
+    passwordHash: corporatorHash,
+    role: 'CORPORATOR',
     status: 'active',
+    partyId: party._id,
     parentUserId: mayor._id,
-    createdBy: admin._id,
+    createdBy: mayor._id,
+    assignedScopeIds: [ward1._id],
+    mustChangePassword: false,
+  });
+
+  const divHash = await bcrypt.hash('Divisional@123', 12);
+  const divIncharge = await User.create({
+    name: 'Suresh Nair',
+    username: 'div_suresh',
+    passwordHash: divHash,
+    role: 'DIVISIONAL_INCHARGE',
+    status: 'active',
+    partyId: party._id,
+    parentUserId: corporator._id,
+    createdBy: corporator._id,
     assignedScopeIds: [ward1._id],
     mustChangePassword: false,
   });
@@ -84,8 +115,9 @@ async function seed() {
     passwordHash: memberHash,
     role: 'WARD_MEMBER',
     status: 'active',
-    parentUserId: supervisor._id,
-    createdBy: admin._id,
+    partyId: party._id,
+    parentUserId: divIncharge._id,
+    createdBy: divIncharge._id,
     assignedScopeIds: [ward1._id],
     mustChangePassword: false,
   });
@@ -96,8 +128,9 @@ async function seed() {
     passwordHash: memberHash,
     role: 'WARD_MEMBER',
     status: 'active',
-    parentUserId: supervisor._id,
-    createdBy: admin._id,
+    partyId: party._id,
+    parentUserId: divIncharge._id,
+    createdBy: divIncharge._id,
     assignedScopeIds: [ward2._id],
     mustChangePassword: false,
   });
@@ -114,6 +147,7 @@ async function seed() {
     await VoterRecord.create({
       campaignId: campaign._id,
       geographicAreaId: ward1._id,
+      partyId: party._id,
       name: v.name,
       houseNumber: v.houseNumber,
       address: v.address,
@@ -123,11 +157,13 @@ async function seed() {
   }
 
   console.log('\n✅ Seed complete! Login credentials:');
-  console.log('  Admin:      admin / Admin@123');
-  console.log('  Mayor:      mayor_rajesh / Mayor@123');
-  console.log('  Supervisor: supervisor_priya / Supervisor@123');
-  console.log('  Member:     member_amit / Member@123');
-  console.log('  Member:     member_sunita / Member@123');
+  console.log('  Admin:              admin / Admin@123');
+  console.log('  Mayor:              mayor_rajesh / Mayor@123');
+  console.log('  Corporator:         corporator_priya / Corporator@123');
+  console.log('  Divisional Incharge: div_suresh / Divisional@123');
+  console.log('  Ward Member:        member_amit / Member@123');
+  console.log('  Ward Member:        member_sunita / Member@123');
+  console.log(`  Party:              Municipal Progressive Party`);
 
   await mongoose.disconnect();
 }

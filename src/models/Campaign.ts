@@ -10,6 +10,7 @@ export interface ICampaign extends Document {
   startDate?: Date;
   endDate?: Date;
   createdBy: mongoose.Types.ObjectId;
+  partyId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -22,11 +23,13 @@ const CampaignSchema = new Schema<ICampaign>(
     startDate: { type: Date },
     endDate: { type: Date },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    partyId: { type: Schema.Types.ObjectId, ref: 'Party' },
   },
   { timestamps: true }
 );
 
 CampaignSchema.index({ status: 1 });
 CampaignSchema.index({ createdBy: 1 });
+CampaignSchema.index({ partyId: 1 });
 
 export const Campaign = mongoose.model<ICampaign>('Campaign', CampaignSchema);

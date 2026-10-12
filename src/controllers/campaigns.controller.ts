@@ -8,9 +8,10 @@ import { logAudit } from '../utils/audit';
 export async function listCampaigns(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
+    if (req.user.role === 'MAIN_ADMIN') throw new AppError('Access denied', 403);
 
     const { status, page = '1', limit = '20' } = req.query;
-    const filter: Record<string, unknown> = {};
+    const filter: Record<string, unknown> = { partyId: req.user.partyId };
     if (status) filter.status = status;
 
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
@@ -32,6 +33,7 @@ export async function listCampaigns(req: AuthRequest, res: Response, next: NextF
 export async function createCampaign(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
+    if (req.user.role === 'MAIN_ADMIN') throw new AppError('Access denied', 403);
 
     const { name, description, status, startDate, endDate } = req.body;
     const campaign = await Campaign.create({
@@ -41,6 +43,7 @@ export async function createCampaign(req: AuthRequest, res: Response, next: Next
       startDate,
       endDate,
       createdBy: req.user._id,
+      partyId: req.user.partyId,
     });
 
     await logAudit(req.user._id, 'CREATE_CAMPAIGN', 'Campaign', campaign._id, { name });
@@ -54,11 +57,12 @@ export async function createCampaign(req: AuthRequest, res: Response, next: Next
 export async function updateCampaign(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
+    if (req.user.role === 'MAIN_ADMIN') throw new AppError('Access denied', 403);
 
-    const id = req.params["id"] as string;
+    const id = req.params['id'] as string;
     if (!mongoose.Types.ObjectId.isValid(id)) throw new AppError('Invalid campaign ID', 400);
 
-    const campaign = await Campaign.findById(id);
+    const campaign = await Campaign.findOne({ _id: id, partyId: req.user.partyId });
     if (!campaign) throw new AppError('Campaign not found', 404);
 
     const { name, description, status, startDate, endDate } = req.body;
@@ -80,11 +84,13 @@ export async function updateCampaign(req: AuthRequest, res: Response, next: Next
 export async function getCampaignById(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
+    if (req.user.role === 'MAIN_ADMIN') throw new AppError('Access denied', 403);
 
-    const id = req.params["id"] as string;
+    const id = req.params['id'] as string;
     if (!mongoose.Types.ObjectId.isValid(id)) throw new AppError('Invalid campaign ID', 400);
 
-    const campaign = await Campaign.findById(id).populate('createdBy', 'name username');
+    const campaign = await Campaign.findOne({ _id: id, partyId: req.user.partyId })
+      .populate('createdBy', 'name username');
     if (!campaign) throw new AppError('Campaign not found', 404);
 
     res.json({ success: true, campaign });

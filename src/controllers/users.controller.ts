@@ -10,8 +10,8 @@ import { revokeRefreshTokensForUser } from '../utils/jwt';
 const ROLE_HIERARCHY: Record<UserRole, number> = {
   MAIN_ADMIN: 5,
   MAYOR: 4,
-  SARPANCH: 3,
-  WARD_SUPERVISOR: 2,
+  CORPORATOR: 3,
+  DIVISIONAL_INCHARGE: 2,
   WARD_MEMBER: 1,
 };
 
@@ -26,10 +26,12 @@ export async function listUsers(req: AuthRequest, res: Response, next: NextFunct
     const { role, status, page = '1', limit = '20' } = req.query;
     const filter: Record<string, unknown> = {};
 
-    if (req.user.role !== 'MAIN_ADMIN') {
-      filter.parentUserId = req.user._id;
+    if (req.user.role === 'MAIN_ADMIN') {
+      filter.role = 'MAYOR';
+    } else {
+      filter.partyId = req.user.partyId;
     }
-    if (role) filter.role = role;
+    if (role && req.user.role !== 'MAIN_ADMIN') filter.role = role;
     if (status) filter.status = status;
 
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
@@ -53,7 +55,11 @@ export async function createUser(req: AuthRequest, res: Response, next: NextFunc
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
 
-    const { name, username, password, role, parentUserId, assignedScopeIds } = req.body;
+    const { name, username, password, role, assignedScopeIds } = req.body;
+
+    if (req.user.role === 'MAIN_ADMIN') {
+      throw new AppError('Main Admin must create users via the Parties page', 403);
+    }
 
     if (!canManageRole(req.user.role, role)) {
       throw new AppError('Cannot create user with equal or higher privilege', 403);
@@ -68,7 +74,8 @@ export async function createUser(req: AuthRequest, res: Response, next: NextFunc
       username: username.toLowerCase(),
       passwordHash,
       role,
-      parentUserId: parentUserId || req.user._id,
+      partyId: req.user.partyId,
+      parentUserId: req.user._id,
       assignedScopeIds: assignedScopeIds || [],
       createdBy: req.user._id,
       mustChangePassword: true,
@@ -77,8 +84,7 @@ export async function createUser(req: AuthRequest, res: Response, next: NextFunc
 
     await logAudit(req.user._id, 'CREATE_USER', 'User', user._id, { role, username });
 
-    const userObj = user.toJSON();
-    res.status(201).json({ success: true, user: userObj });
+    res.status(201).json({ success: true, user: user.toJSON() });
   } catch (err) {
     next(err);
   }
@@ -88,13 +94,13 @@ export async function updateUser(req: AuthRequest, res: Response, next: NextFunc
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
 
-    const id = req.params["id"] as string;
+    const id = req.params['id'] as string;
     if (!mongoose.Types.ObjectId.isValid(id)) throw new AppError('Invalid user ID', 400);
 
     const target = await User.findById(id);
     if (!target) throw new AppError('User not found', 404);
 
-    if (req.user.role !== 'MAIN_ADMIN' && target.parentUserId?.toString() !== req.user._id.toString()) {
+    if (req.user.role !== 'MAIN_ADMIN' && target.partyId?.toString() !== req.user.partyId?.toString()) {
       throw new AppError('Access denied', 403);
     }
 
@@ -115,7 +121,7 @@ export async function resetCredentials(req: AuthRequest, res: Response, next: Ne
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
 
-    const id = req.params["id"] as string;
+    const id = req.params['id'] as string;
     if (!mongoose.Types.ObjectId.isValid(id)) throw new AppError('Invalid user ID', 400);
 
     const target = await User.findById(id);
@@ -123,6 +129,10 @@ export async function resetCredentials(req: AuthRequest, res: Response, next: Ne
 
     if (!canManageRole(req.user.role, target.role)) {
       throw new AppError('Cannot reset credentials for this user', 403);
+    }
+
+    if (req.user.role !== 'MAIN_ADMIN' && target.partyId?.toString() !== req.user.partyId?.toString()) {
+      throw new AppError('Access denied', 403);
     }
 
     const { newPassword } = req.body;
@@ -143,7 +153,7 @@ export async function suspendUser(req: AuthRequest, res: Response, next: NextFun
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
 
-    const id = req.params["id"] as string;
+    const id = req.params['id'] as string;
     if (!mongoose.Types.ObjectId.isValid(id)) throw new AppError('Invalid user ID', 400);
 
     const target = await User.findById(id);
@@ -151,6 +161,10 @@ export async function suspendUser(req: AuthRequest, res: Response, next: NextFun
 
     if (!canManageRole(req.user.role, target.role)) {
       throw new AppError('Cannot suspend this user', 403);
+    }
+
+    if (req.user.role !== 'MAIN_ADMIN' && target.partyId?.toString() !== req.user.partyId?.toString()) {
+      throw new AppError('Access denied', 403);
     }
 
     const { action } = req.body;
@@ -173,7 +187,7 @@ export async function getUserById(req: AuthRequest, res: Response, next: NextFun
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
 
-    const id = req.params["id"] as string;
+    const id = req.params['id'] as string;
     if (!mongoose.Types.ObjectId.isValid(id)) throw new AppError('Invalid user ID', 400);
 
     const user = await User.findById(id)

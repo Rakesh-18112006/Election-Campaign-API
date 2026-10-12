@@ -20,6 +20,8 @@ export async function listRecords(req: AuthRequest, res: Response, next: NextFun
     if (geographicAreaId) filter.geographicAreaId = geographicAreaId;
     if (recordStatus) filter.recordStatus = recordStatus;
 
+    if (req.user.role === 'MAIN_ADMIN') throw new AppError('Access denied', 403);
+
     if (req.user.role === 'WARD_MEMBER') {
       const assignments = await RecordAssignment.find({
         assignedUserId: req.user._id,
@@ -27,8 +29,11 @@ export async function listRecords(req: AuthRequest, res: Response, next: NextFun
       }).select('voterRecordId');
       const recordIds = assignments.map((a) => a.voterRecordId);
       filter._id = { $in: recordIds };
-    } else if (req.user.role !== 'MAIN_ADMIN' && req.user.assignedScopeIds.length > 0) {
-      filter.geographicAreaId = { $in: req.user.assignedScopeIds };
+    } else {
+      filter.partyId = req.user.partyId;
+      if (req.user.role === 'DIVISIONAL_INCHARGE' && req.user.assignedScopeIds.length > 0) {
+        filter.geographicAreaId = { $in: req.user.assignedScopeIds };
+      }
     }
 
     if (search) {
@@ -97,6 +102,7 @@ export async function createRecord(req: AuthRequest, res: Response, next: NextFu
     const record = await VoterRecord.create({
       campaignId,
       geographicAreaId,
+      partyId: req.user.partyId,
       name,
       voterIdRef,
       houseNumber,
@@ -156,6 +162,7 @@ export async function importRecords(req: AuthRequest, res: Response, next: NextF
       records.push({
         campaignId: new mongoose.Types.ObjectId(campaignId),
         geographicAreaId: new mongoose.Types.ObjectId(geographicAreaId),
+        partyId: req.user.partyId,
         name,
         voterIdRef: (row['voter_id'] || row['voterIdRef'] || row['Voter ID'] || '').toString().trim() || undefined,
         houseNumber: (row['house_number'] || row['houseNumber'] || row['House Number'] || '').toString().trim() || undefined,

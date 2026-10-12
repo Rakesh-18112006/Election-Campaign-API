@@ -53,7 +53,7 @@ export function isMainAdmin(req: AuthRequest, res: Response, next: NextFunction)
 }
 
 export function isManagerOrAbove(req: AuthRequest, res: Response, next: NextFunction): void {
-  const managerRoles: UserRole[] = ['MAIN_ADMIN', 'MAYOR', 'SARPANCH', 'WARD_SUPERVISOR'];
+  const managerRoles: UserRole[] = ['MAYOR', 'CORPORATOR', 'DIVISIONAL_INCHARGE'];
   if (!req.user || !managerRoles.includes(req.user.role)) {
     res.status(403).json({ success: false, message: 'Manager access required' });
     return;

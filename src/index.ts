@@ -14,6 +14,7 @@ import campaignsRoutes from './routes/campaigns.routes';
 import areasRoutes from './routes/areas.routes';
 import recordsRoutes from './routes/records.routes';
 import dashboardRoutes from './routes/dashboard.routes';
+import partiesRoutes from './routes/parties.routes';
 
 const app = express();
 
@@ -47,6 +48,7 @@ app.get('/api/v1/health', (_req, res) => {
 
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', usersRoutes);
+app.use('/api/v1/parties', partiesRoutes);
 app.use('/api/v1/campaigns', campaignsRoutes);
 app.use('/api/v1/areas', areasRoutes);
 app.use('/api/v1/records', recordsRoutes);

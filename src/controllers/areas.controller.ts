@@ -8,9 +8,10 @@ import { logAudit } from '../utils/audit';
 export async function listAreas(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
+    if (req.user.role === 'MAIN_ADMIN') throw new AppError('Access denied', 403);
 
     const { campaignId, parentAreaId, areaType } = req.query;
-    const filter: Record<string, unknown> = {};
+    const filter: Record<string, unknown> = { partyId: req.user.partyId };
 
     if (campaignId) {
       if (!mongoose.Types.ObjectId.isValid(campaignId as string)) throw new AppError('Invalid campaign ID', 400);
@@ -21,13 +22,8 @@ export async function listAreas(req: AuthRequest, res: Response, next: NextFunct
 
     if (req.user.role === 'WARD_MEMBER') {
       filter._id = { $in: req.user.assignedScopeIds };
-    } else if (req.user.role !== 'MAIN_ADMIN') {
-      const accessible = new Set([
-        ...req.user.assignedScopeIds.map((id) => id.toString()),
-      ]);
-      if (accessible.size > 0) {
-        filter._id = { $in: Array.from(accessible) };
-      }
+    } else if (req.user.role === 'DIVISIONAL_INCHARGE' && req.user.assignedScopeIds.length > 0) {
+      filter._id = { $in: req.user.assignedScopeIds };
     }
 
     const areas = await GeographicArea.find(filter)
@@ -44,6 +40,7 @@ export async function listAreas(req: AuthRequest, res: Response, next: NextFunct
 export async function createArea(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
+    if (req.user.role === 'MAIN_ADMIN') throw new AppError('Access denied', 403);
 
     const { name, areaType, campaignId, parentAreaId, managerIds } = req.body;
 
@@ -62,6 +59,7 @@ export async function createArea(req: AuthRequest, res: Response, next: NextFunc
       campaignId,
       parentAreaId,
       managerIds: managerIds || [],
+      partyId: req.user.partyId,
     });
 
     await logAudit(req.user._id, 'CREATE_AREA', 'GeographicArea', area._id, { name, campaignId });
@@ -76,10 +74,10 @@ export async function updateArea(req: AuthRequest, res: Response, next: NextFunc
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
 
-    const id = req.params["id"] as string;
+    const id = req.params['id'] as string;
     if (!mongoose.Types.ObjectId.isValid(id)) throw new AppError('Invalid area ID', 400);
 
-    const area = await GeographicArea.findById(id);
+    const area = await GeographicArea.findOne({ _id: id, partyId: req.user.partyId });
     if (!area) throw new AppError('Area not found', 404);
 
     const { name, areaType, status, managerIds } = req.body;
@@ -101,7 +99,7 @@ export async function getAreaById(req: AuthRequest, res: Response, next: NextFun
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
 
-    const id = req.params["id"] as string;
+    const id = req.params['id'] as string;
     if (!mongoose.Types.ObjectId.isValid(id)) throw new AppError('Invalid area ID', 400);
 
     const area = await GeographicArea.findById(id)

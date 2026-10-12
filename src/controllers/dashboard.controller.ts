@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { Campaign } from '../models/Campaign';
 import { VoterRecord } from '../models/VoterRecord';
 import { User } from '../models/User';
+import { Party } from '../models/Party';
 import { RecordAssignment } from '../models/RecordAssignment';
 import { AuditLog } from '../models/AuditLog';
 import { AuthRequest } from '../middleware/auth';
@@ -12,7 +13,28 @@ export async function getOverview(req: AuthRequest, res: Response, next: NextFun
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
 
-    const recordFilter: Record<string, unknown> = {};
+    // MAIN_ADMIN sees party-level stats only
+    if (req.user.role === 'MAIN_ADMIN') {
+      const [totalParties, activeParties, totalMayors] = await Promise.all([
+        Party.countDocuments(),
+        Party.countDocuments({ status: 'active' }),
+        User.countDocuments({ role: 'MAYOR' }),
+      ]);
+      return res.json({
+        success: true,
+        stats: {
+          parties: { total: totalParties, active: activeParties },
+          mayors: { total: totalMayors },
+          records: { total: 0, visited: 0, notVisited: 0, assigned: 0, unassigned: 0, completionRate: 0 },
+          campaigns: { total: 0, active: 0 },
+          users: { total: totalMayors, active: totalMayors, suspended: 0 },
+          recentActivity: [],
+        },
+      });
+    }
+
+    const partyFilter = { partyId: req.user.partyId };
+    const recordFilter: Record<string, unknown> = { partyId: req.user.partyId };
 
     if (req.user.role === 'WARD_MEMBER') {
       const assignments = await RecordAssignment.find({
@@ -20,7 +42,8 @@ export async function getOverview(req: AuthRequest, res: Response, next: NextFun
         assignmentStatus: 'active',
       }).select('voterRecordId');
       recordFilter._id = { $in: assignments.map((a) => a.voterRecordId) };
-    } else if (req.user.role !== 'MAIN_ADMIN' && req.user.assignedScopeIds.length > 0) {
+      delete recordFilter.partyId;
+    } else if (req.user.role === 'DIVISIONAL_INCHARGE' && req.user.assignedScopeIds.length > 0) {
       recordFilter.geographicAreaId = { $in: req.user.assignedScopeIds };
     }
 
@@ -37,16 +60,16 @@ export async function getOverview(req: AuthRequest, res: Response, next: NextFun
       suspendedUsers,
       recentActivity,
     ] = await Promise.all([
-      Campaign.countDocuments(),
-      Campaign.countDocuments({ status: 'active' }),
+      Campaign.countDocuments(partyFilter),
+      Campaign.countDocuments({ ...partyFilter, status: 'active' }),
       VoterRecord.countDocuments(recordFilter),
       VoterRecord.countDocuments({ ...recordFilter, recordStatus: 'visited' }),
       VoterRecord.countDocuments({ ...recordFilter, recordStatus: 'not_visited' }),
       VoterRecord.countDocuments({ ...recordFilter, recordStatus: 'assigned' }),
       VoterRecord.countDocuments({ ...recordFilter, recordStatus: 'unassigned' }),
-      User.countDocuments({ role: { $ne: 'MAIN_ADMIN' } }),
-      User.countDocuments({ role: { $ne: 'MAIN_ADMIN' }, status: 'active' }),
-      User.countDocuments({ role: { $ne: 'MAIN_ADMIN' }, status: 'suspended' }),
+      User.countDocuments({ ...partyFilter, role: { $ne: 'MAIN_ADMIN' } }),
+      User.countDocuments({ ...partyFilter, role: { $ne: 'MAIN_ADMIN' }, status: 'active' }),
+      User.countDocuments({ ...partyFilter, role: { $ne: 'MAIN_ADMIN' }, status: 'suspended' }),
       AuditLog.find()
         .populate('actorUserId', 'name username')
         .sort({ timestamp: -1 })

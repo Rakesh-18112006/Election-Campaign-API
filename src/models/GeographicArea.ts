@@ -11,6 +11,7 @@ export interface IGeographicArea extends Document {
   parentAreaId?: mongoose.Types.ObjectId;
   managerIds: mongoose.Types.ObjectId[];
   status: AreaStatus;
+  partyId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -23,6 +24,7 @@ const GeographicAreaSchema = new Schema<IGeographicArea>(
     parentAreaId: { type: Schema.Types.ObjectId, ref: 'GeographicArea' },
     managerIds: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
+    partyId: { type: Schema.Types.ObjectId, ref: 'Party' },
   },
   { timestamps: true }
 );
@@ -30,5 +32,6 @@ const GeographicAreaSchema = new Schema<IGeographicArea>(
 GeographicAreaSchema.index({ campaignId: 1 });
 GeographicAreaSchema.index({ parentAreaId: 1 });
 GeographicAreaSchema.index({ managerIds: 1 });
+GeographicAreaSchema.index({ partyId: 1 });
 
 export const GeographicArea = mongoose.model<IGeographicArea>('GeographicArea', GeographicAreaSchema);

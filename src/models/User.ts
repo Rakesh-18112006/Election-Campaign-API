@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
-export type UserRole = 'MAIN_ADMIN' | 'MAYOR' | 'SARPANCH' | 'WARD_SUPERVISOR' | 'WARD_MEMBER';
+export type UserRole = 'MAIN_ADMIN' | 'MAYOR' | 'CORPORATOR' | 'DIVISIONAL_INCHARGE' | 'WARD_MEMBER';
 export type AccountStatus = 'active' | 'suspended' | 'pending';
 
 export interface IUser extends Document {
@@ -11,6 +11,7 @@ export interface IUser extends Document {
   passwordHash: string;
   role: UserRole;
   status: AccountStatus;
+  partyId?: mongoose.Types.ObjectId;
   parentUserId?: mongoose.Types.ObjectId;
   assignedScopeIds: mongoose.Types.ObjectId[];
   mustChangePassword: boolean;
@@ -28,10 +29,11 @@ const UserSchema = new Schema<IUser>(
     passwordHash: { type: String, required: true },
     role: {
       type: String,
-      enum: ['MAIN_ADMIN', 'MAYOR', 'SARPANCH', 'WARD_SUPERVISOR', 'WARD_MEMBER'],
+      enum: ['MAIN_ADMIN', 'MAYOR', 'CORPORATOR', 'DIVISIONAL_INCHARGE', 'WARD_MEMBER'],
       required: true,
     },
     status: { type: String, enum: ['active', 'suspended', 'pending'], default: 'active' },
+    partyId: { type: Schema.Types.ObjectId, ref: 'Party' },
     parentUserId: { type: Schema.Types.ObjectId, ref: 'User' },
     assignedScopeIds: [{ type: Schema.Types.ObjectId, ref: 'GeographicArea' }],
     mustChangePassword: { type: Boolean, default: false },
@@ -43,6 +45,7 @@ const UserSchema = new Schema<IUser>(
 
 UserSchema.index({ role: 1 });
 UserSchema.index({ status: 1 });
+UserSchema.index({ partyId: 1 });
 
 UserSchema.methods.comparePassword = async function (password: string): Promise<boolean> {
   return bcrypt.compare(password, this.passwordHash);
