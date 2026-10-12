@@ -25,6 +25,12 @@ const COOKIE_OPTS = {
   maxAge: 7 * 24 * 60 * 60 * 1000,
 };
 
+// Native clients can't rely on HttpOnly cookies, so they opt in to receiving the
+// refresh token in the JSON body (and sending it back in the body on refresh).
+function isMobileClient(req: Request): boolean {
+  return req.headers['x-client'] === 'mobile';
+}
+
 export async function login(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { username, password } = req.body;
@@ -53,6 +59,7 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
     res.json({
       success: true,
       accessToken,
+      ...(isMobileClient(req) && { refreshToken }),
       user: {
         _id: user._id,
         name: user.name,
@@ -82,13 +89,19 @@ export async function logout(req: AuthRequest, res: Response, next: NextFunction
 
 export async function refresh(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const token = req.cookies?.refreshToken;
+    const token = req.cookies?.refreshToken || (isMobileClient(req) ? req.body?.refreshToken : undefined);
     if (!token) {
       res.status(401).json({ success: false, message: 'No refresh token' });
       return;
     }
 
-    const decoded = verifyRefreshToken(token);
+    let decoded: { userId: string };
+    try {
+      decoded = verifyRefreshToken(token);
+    } catch {
+      res.status(401).json({ success: false, message: 'Invalid refresh token' });
+      return;
+    }
     const stored = await RefreshToken.findOne({ token, userId: decoded.userId });
     if (!stored || stored.expiresAt < new Date()) {
       res.status(401).json({ success: false, message: 'Invalid refresh token' });
@@ -107,7 +120,11 @@ export async function refresh(req: Request, res: Response, next: NextFunction): 
     await saveRefreshToken(user._id.toString(), newRefreshToken);
 
     res.cookie('refreshToken', newRefreshToken, COOKIE_OPTS);
-    res.json({ success: true, accessToken: newAccessToken });
+    res.json({
+      success: true,
+      accessToken: newAccessToken,
+      ...(isMobileClient(req) && { refreshToken: newRefreshToken }),
+    });
   } catch (err) {
     next(err);
   }
@@ -133,11 +150,21 @@ export async function changePassword(req: AuthRequest, res: Response, next: Next
     await user.save();
 
     await revokeRefreshTokensForUser(user._id.toString());
-    res.clearCookie('refreshToken', COOKIE_OPTS);
+
+    // Keep the current session alive with a fresh token pair (old ones were just revoked).
+    const accessToken = generateAccessToken(user._id.toString());
+    const refreshToken = generateRefreshToken(user._id.toString());
+    await saveRefreshToken(user._id.toString(), refreshToken);
+    res.cookie('refreshToken', refreshToken, COOKIE_OPTS);
 
     await logAudit(user._id, 'PASSWORD_CHANGE', 'User', user._id);
 
-    res.json({ success: true, message: 'Password changed successfully' });
+    res.json({
+      success: true,
+      message: 'Password changed successfully',
+      accessToken,
+      ...(isMobileClient(req) && { refreshToken }),
+    });
   } catch (err) {
     next(err);
   }
