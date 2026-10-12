@@ -20,7 +20,7 @@ export async function getOverview(req: AuthRequest, res: Response, next: NextFun
         Party.countDocuments({ status: 'active' }),
         User.countDocuments({ role: 'MAYOR' }),
       ]);
-      return res.json({
+      res.json({
         success: true,
         stats: {
           parties: { total: totalParties, active: activeParties },
@@ -31,6 +31,7 @@ export async function getOverview(req: AuthRequest, res: Response, next: NextFun
           recentActivity: [],
         },
       });
+      return;
     }
 
     const partyFilter = { partyId: req.user.partyId };

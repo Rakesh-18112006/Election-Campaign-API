@@ -14,12 +14,14 @@ import { AppError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { env } from '../config/env';
 
-// Cross-domain (prod): sameSite=none+secure so browser sends cookie to API subdomain.
+// Cross-domain (prod/Vercel): sameSite=none+secure so browser sends cookie across subdomains.
 // Local dev: sameSite=lax is fine (same origin via Vite proxy).
+// Use VERCEL env var as fallback because Vercel may not set NODE_ENV automatically.
+const isProduction = !env.isDev || !!process.env.VERCEL;
 const COOKIE_OPTS = {
   httpOnly: true,
-  secure: !env.isDev,
-  sameSite: (env.isDev ? 'lax' : 'none') as 'lax' | 'none',
+  secure: isProduction,
+  sameSite: (isProduction ? 'none' : 'lax') as 'lax' | 'none',
   maxAge: 7 * 24 * 60 * 60 * 1000,
 };
 
@@ -71,7 +73,7 @@ export async function logout(req: AuthRequest, res: Response, next: NextFunction
       await revokeRefreshTokensForUser(req.user._id.toString());
       await logAudit(req.user._id, 'LOGOUT', 'User', req.user._id);
     }
-    res.clearCookie('refreshToken');
+    res.clearCookie('refreshToken', COOKIE_OPTS);
     res.json({ success: true, message: 'Logged out successfully' });
   } catch (err) {
     next(err);
@@ -131,7 +133,7 @@ export async function changePassword(req: AuthRequest, res: Response, next: Next
     await user.save();
 
     await revokeRefreshTokensForUser(user._id.toString());
-    res.clearCookie('refreshToken');
+    res.clearCookie('refreshToken', COOKIE_OPTS);
 
     await logAudit(user._id, 'PASSWORD_CHANGE', 'User', user._id);
 
