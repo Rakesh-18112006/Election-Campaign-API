@@ -6,14 +6,7 @@ import { AuthRequest } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { logAudit } from '../utils/audit';
 import { revokeRefreshTokensForUser } from '../utils/jwt';
-
-const ROLE_HIERARCHY: Record<UserRole, number> = {
-  MAIN_ADMIN: 5,
-  MAYOR: 4,
-  CORPORATOR: 3,
-  DIVISIONAL_INCHARGE: 2,
-  WARD_MEMBER: 1,
-};
+import { ROLE_HIERARCHY } from '../utils/roles';
 
 function canManageRole(actorRole: UserRole, targetRole: UserRole): boolean {
   return ROLE_HIERARCHY[actorRole] > ROLE_HIERARCHY[targetRole];

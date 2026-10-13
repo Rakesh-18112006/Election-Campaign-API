@@ -2,12 +2,31 @@ import { Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import { Campaign } from '../models/Campaign';
 import { VoterRecord } from '../models/VoterRecord';
-import { User } from '../models/User';
+import { User, IUser } from '../models/User';
 import { Party } from '../models/Party';
+import { GeographicArea } from '../models/GeographicArea';
 import { RecordAssignment } from '../models/RecordAssignment';
 import { AuditLog } from '../models/AuditLog';
 import { AuthRequest } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
+import { rolesBelow } from '../utils/roles';
+
+// Activity feed on the dashboard: your own actions plus those of lower-ranked users in your
+// party. Higher roles (e.g. the Mayor) and other parties are never visible, and ward members
+// get no feed at all.
+async function getRecentActivity(user: IUser) {
+  if (user.role === 'WARD_MEMBER' || !user.partyId) return [];
+
+  const visibleActors = await User.find({
+    partyId: user.partyId,
+    $or: [{ _id: user._id }, { role: { $in: rolesBelow(user.role) } }],
+  }).select('_id');
+
+  return AuditLog.find({ actorUserId: { $in: visibleActors.map((u) => u._id) } })
+    .populate('actorUserId', 'name username')
+    .sort({ timestamp: -1 })
+    .limit(10);
+}
 
 export async function getOverview(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -71,10 +90,7 @@ export async function getOverview(req: AuthRequest, res: Response, next: NextFun
       User.countDocuments({ ...partyFilter, role: { $ne: 'MAIN_ADMIN' } }),
       User.countDocuments({ ...partyFilter, role: { $ne: 'MAIN_ADMIN' }, status: 'active' }),
       User.countDocuments({ ...partyFilter, role: { $ne: 'MAIN_ADMIN' }, status: 'suspended' }),
-      AuditLog.find()
-        .populate('actorUserId', 'name username')
-        .sort({ timestamp: -1 })
-        .limit(10),
+      getRecentActivity(req.user),
     ]);
 
     const completionRate = totalRecords > 0 ? Math.round((visitedRecords / totalRecords) * 100) : 0;
@@ -107,7 +123,7 @@ export async function getCampaignStats(req: AuthRequest, res: Response, next: Ne
     const id = req.params["id"] as string;
     if (!mongoose.Types.ObjectId.isValid(id)) throw new AppError('Invalid campaign ID', 400);
 
-    const campaign = await Campaign.findById(id);
+    const campaign = await Campaign.findOne({ _id: id, partyId: req.user.partyId });
     if (!campaign) throw new AppError('Campaign not found', 404);
 
     const [totalRecords, byStatus] = await Promise.all([
@@ -149,6 +165,9 @@ export async function getAreaStats(req: AuthRequest, res: Response, next: NextFu
 
     const id = req.params["id"] as string;
     if (!mongoose.Types.ObjectId.isValid(id)) throw new AppError('Invalid area ID', 400);
+
+    const area = await GeographicArea.findOne({ _id: id, partyId: req.user.partyId });
+    if (!area) throw new AppError('Area not found', 404);
 
     const [total, visited, notVisited, assigned, unassigned] = await Promise.all([
       VoterRecord.countDocuments({ geographicAreaId: id }),

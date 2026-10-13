@@ -5,9 +5,30 @@ import { RecordAssignment } from '../models/RecordAssignment';
 import { GeographicArea } from '../models/GeographicArea';
 import { AuthRequest } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
+import { IUser } from '../models/User';
 import { logAudit } from '../utils/audit';
 import { parse } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
+
+// Managers may only write voters into areas of their own party and campaign, and a Divisional
+// Incharge only into the areas assigned to them.
+async function assertWritableArea(user: IUser, campaignId: string, areaId: string) {
+  const area = await GeographicArea.findOne({ _id: areaId, partyId: user.partyId });
+  if (!area) throw new AppError('Geographic area not found', 404);
+  if (area.campaignId.toString() !== campaignId) {
+    throw new AppError('The selected area does not belong to the selected campaign', 400);
+  }
+  if (user.role === 'DIVISIONAL_INCHARGE' && user.assignedScopeIds.length > 0) {
+    const inScope = user.assignedScopeIds.some((id) => id.toString() === areaId);
+    if (!inScope) throw new AppError('This area is outside your assigned scope', 403);
+  }
+  return area;
+}
+
+const clean = (v: unknown): string | undefined => {
+  const t = typeof v === 'string' ? v.trim() : '';
+  return t || undefined;
+};
 
 export async function listRecords(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -94,10 +115,20 @@ export async function createRecord(req: AuthRequest, res: Response, next: NextFu
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
 
-    const { campaignId, geographicAreaId, name, voterIdRef, houseNumber, phone, address } = req.body;
+    const { campaignId, geographicAreaId } = req.body;
+    const name = clean(req.body.name);
+    const voterIdRef = clean(req.body.voterIdRef);
 
+    if (!name) throw new AppError('Name is required', 400);
     if (!mongoose.Types.ObjectId.isValid(campaignId)) throw new AppError('Invalid campaign ID', 400);
     if (!mongoose.Types.ObjectId.isValid(geographicAreaId)) throw new AppError('Invalid area ID', 400);
+
+    await assertWritableArea(req.user, campaignId, geographicAreaId);
+
+    if (voterIdRef) {
+      const duplicate = await VoterRecord.exists({ partyId: req.user.partyId, campaignId, voterIdRef });
+      if (duplicate) throw new AppError('A voter with this Voter ID already exists in this campaign', 409);
+    }
 
     const record = await VoterRecord.create({
       campaignId,
@@ -105,9 +136,9 @@ export async function createRecord(req: AuthRequest, res: Response, next: NextFu
       partyId: req.user.partyId,
       name,
       voterIdRef,
-      houseNumber,
-      phone,
-      address,
+      houseNumber: clean(req.body.houseNumber),
+      phone: clean(req.body.phone),
+      address: clean(req.body.address),
     });
 
     await logAudit(req.user._id, 'CREATE_RECORD', 'VoterRecord', record._id);
@@ -127,8 +158,7 @@ export async function importRecords(req: AuthRequest, res: Response, next: NextF
     if (!mongoose.Types.ObjectId.isValid(campaignId)) throw new AppError('Invalid campaign ID', 400);
     if (!mongoose.Types.ObjectId.isValid(geographicAreaId)) throw new AppError('Invalid area ID', 400);
 
-    const area = await GeographicArea.findById(geographicAreaId);
-    if (!area) throw new AppError('Geographic area not found', 404);
+    await assertWritableArea(req.user, campaignId, geographicAreaId);
 
     let rows: Record<string, string>[] = [];
     const filename = req.file.originalname.toLowerCase();
