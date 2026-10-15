@@ -6,6 +6,11 @@ import { User } from '../models/User';
 import { AuthRequest } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { logAudit } from '../utils/audit';
+import {
+  PARTY_TYPES, PARTY_THEMES, PARTY_LABELS, HEX_COLOR, buildCustomTheme, PartyType, PartyTheme,
+} from '../config/partyThemes';
+
+const DEFAULT_CUSTOM_COLOR = '#1D4ED8';
 
 export async function listParties(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -34,10 +39,26 @@ export async function createParty(req: AuthRequest, res: Response, next: NextFun
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
 
-    const { partyName, partyDescription, mayorName, mayorUsername, mayorPassword } = req.body;
+    const { partyType = 'OTHER', partyDescription, primaryColor, mayorName, mayorUsername, mayorPassword } = req.body;
 
-    if (!partyName || !mayorName || !mayorUsername || !mayorPassword) {
-      throw new AppError('Party name, mayor name, username and password are required', 400);
+    if (!PARTY_TYPES.includes(partyType)) throw new AppError('Invalid party type', 400);
+
+    let partyName: string;
+    let theme: PartyTheme;
+    if (partyType === 'OTHER') {
+      partyName = String(req.body.partyName ?? '').trim();
+      if (!partyName) throw new AppError('Party name is required for other parties', 400);
+      if (primaryColor !== undefined && !HEX_COLOR.test(primaryColor)) {
+        throw new AppError('Primary colour must be a hex value like #1D4ED8', 400);
+      }
+      theme = buildCustomTheme(primaryColor ?? DEFAULT_CUSTOM_COLOR);
+    } else {
+      partyName = PARTY_LABELS[partyType as Exclude<PartyType, 'OTHER'>];
+      theme = PARTY_THEMES[partyType as Exclude<PartyType, 'OTHER'>];
+    }
+
+    if (!mayorName || !mayorUsername || !mayorPassword) {
+      throw new AppError('Mayor name, username and password are required', 400);
     }
 
     const existing = await User.findOne({ username: mayorUsername.toLowerCase() });
@@ -46,7 +67,7 @@ export async function createParty(req: AuthRequest, res: Response, next: NextFun
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
-      const [party] = await Party.create([{ name: partyName, description: partyDescription, createdBy: req.user._id }], { session });
+      const [party] = await Party.create([{ name: partyName, description: partyDescription, partyType, theme, createdBy: req.user._id }], { session });
 
       const passwordHash = await bcrypt.hash(mayorPassword, 12);
       const [mayor] = await User.create([{
@@ -66,7 +87,7 @@ export async function createParty(req: AuthRequest, res: Response, next: NextFun
 
       await session.commitTransaction();
 
-      await logAudit(req.user._id, 'CREATE_PARTY', 'Party', party._id, { partyName, mayorUsername });
+      await logAudit(req.user._id, 'CREATE_PARTY', 'Party', party._id, { partyName, partyType, mayorUsername });
 
       res.status(201).json({ success: true, party: await Party.findById(party._id).populate('adminUserId', 'name username role') });
     } catch (err) {

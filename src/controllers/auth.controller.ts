@@ -10,6 +10,7 @@ import {
   revokeRefreshTokensForUser,
 } from '../utils/jwt';
 import { logAudit } from '../utils/audit';
+import { getThemeForParty } from '../utils/partyTheme';
 import { AppError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { env } from '../config/env';
@@ -68,6 +69,7 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
         mustChangePassword: user.mustChangePassword,
         assignedScopeIds: user.assignedScopeIds,
       },
+      theme: await getThemeForParty(user.partyId),
     });
   } catch (err) {
     next(err);
@@ -173,7 +175,7 @@ export async function changePassword(req: AuthRequest, res: Response, next: Next
 export async function getMe(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
-    res.json({ success: true, user: req.user });
+    res.json({ success: true, user: req.user, theme: await getThemeForParty(req.user.partyId) });
   } catch (err) {
     next(err);
   }
