@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
-import { VoterRecord } from '../models/VoterRecord';
+import { VoterRecord, VoterRelation, VoterGender } from '../models/VoterRecord';
 import { RecordAssignment } from '../models/RecordAssignment';
 import { GeographicArea } from '../models/GeographicArea';
 import { AuthRequest } from '../middleware/auth';
@@ -111,6 +111,31 @@ export async function getRecordById(req: AuthRequest, res: Response, next: NextF
   }
 }
 
+const VALID_RELATIONS = ['father', 'husband', 'mother', 'self', 'other'];
+const VALID_GENDERS = ['male', 'female', 'other'];
+
+// Normalizes a relation/gender cell to our internal enum. Accepts English
+// labels and the exact Telugu values real electoral-roll exports use
+// (verified against a real reconciled roll, 42_guntur.xlsx: సంబంధం cells
+// read "తండ్రి పేరు" / "భర్త పేరు" / "తల్లి పేరు"; లింగము cells read "పు" / "స్త్రీ").
+function normalizeRelation(raw: string): VoterRelation | undefined {
+  const v = raw.trim().toLowerCase();
+  if (!v) return undefined;
+  if (v.includes('తండ్రి') || v === 'father') return 'father';
+  if (v.includes('భర్త') || v === 'husband') return 'husband';
+  if (v.includes('తల్లి') || v === 'mother') return 'mother';
+  if (v.includes('స్వయం') || v === 'self') return 'self';
+  return VALID_RELATIONS.includes(v) ? (v as VoterRelation) : 'other';
+}
+
+function normalizeGender(raw: string): VoterGender | undefined {
+  const v = raw.trim().toLowerCase();
+  if (!v) return undefined;
+  if (v === 'పు' || v.includes('పురుష') || v === 'male' || v === 'm') return 'male';
+  if (v === 'స్త్రీ' || v.includes('ఆడ') || v === 'female' || v === 'f') return 'female';
+  return VALID_GENDERS.includes(v) ? (v as VoterGender) : 'other';
+}
+
 export async function createRecord(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
@@ -118,10 +143,17 @@ export async function createRecord(req: AuthRequest, res: Response, next: NextFu
     const { campaignId, geographicAreaId } = req.body;
     const name = clean(req.body.name);
     const voterIdRef = clean(req.body.voterIdRef);
+    const relation = clean(req.body.relation);
+    const gender = clean(req.body.gender);
+    const ageRaw = req.body.age;
+    const age = ageRaw !== undefined && ageRaw !== '' ? Number(ageRaw) : undefined;
 
     if (!name) throw new AppError('Name is required', 400);
     if (!mongoose.Types.ObjectId.isValid(campaignId)) throw new AppError('Invalid campaign ID', 400);
     if (!mongoose.Types.ObjectId.isValid(geographicAreaId)) throw new AppError('Invalid area ID', 400);
+    if (relation && !VALID_RELATIONS.includes(relation)) throw new AppError('Invalid relation', 400);
+    if (gender && !VALID_GENDERS.includes(gender)) throw new AppError('Invalid gender', 400);
+    if (age !== undefined && (Number.isNaN(age) || age < 0 || age > 130)) throw new AppError('Invalid age', 400);
 
     await assertWritableArea(req.user, campaignId, geographicAreaId);
 
@@ -139,6 +171,11 @@ export async function createRecord(req: AuthRequest, res: Response, next: NextFu
       houseNumber: clean(req.body.houseNumber),
       phone: clean(req.body.phone),
       address: clean(req.body.address),
+      wardSerialNumber: clean(req.body.wardSerialNumber),
+      relation: relation as VoterRelation | undefined,
+      fatherOrHusbandName: clean(req.body.fatherOrHusbandName),
+      age,
+      gender: gender as VoterGender | undefined,
     });
 
     await logAudit(req.user._id, 'CREATE_RECORD', 'VoterRecord', record._id);
@@ -182,22 +219,39 @@ export async function importRecords(req: AuthRequest, res: Response, next: NextF
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const name = (row['name'] || row['Name'] || row['NAME'] || '').toString().trim();
+      const name = (row['name'] || row['Name'] || row['NAME'] || row['Voter Name'] || '').toString().trim();
       if (!name) {
         results.failed++;
         results.errors.push(`Row ${i + 2}: Name is required`);
         continue;
       }
 
+      const relationRaw = (row['relation'] || row['Relation'] || row['సంబంధం'] || '').toString();
+      const genderRaw = (row['gender'] || row['Gender'] || row['లింగము'] || '').toString();
+      const ageRaw = (row['age'] || row['Age'] || row['వయస్సు'] || '').toString().trim();
+
       records.push({
         campaignId: new mongoose.Types.ObjectId(campaignId),
         geographicAreaId: new mongoose.Types.ObjectId(geographicAreaId),
         partyId: req.user.partyId,
         name,
-        voterIdRef: (row['voter_id'] || row['voterIdRef'] || row['Voter ID'] || '').toString().trim() || undefined,
+        voterIdRef:
+          (row['voter_id'] || row['voterIdRef'] || row['Voter ID'] || row['ఓటరు ఐడి. కార్డు నెం.'] || '').toString().trim() ||
+          undefined,
         houseNumber: (row['house_number'] || row['houseNumber'] || row['House Number'] || '').toString().trim() || undefined,
         phone: (row['phone'] || row['Phone'] || row['Mobile'] || '').toString().trim() || undefined,
         address: (row['address'] || row['Address'] || '').toString().trim() || undefined,
+        wardSerialNumber:
+          (row['ward_serial_number'] || row['wardSerialNumber'] || row['Ward Serial Number'] || row['వార్డు.ఓ.జా.వ.సం.'] || '')
+            .toString()
+            .trim() || undefined,
+        relation: normalizeRelation(relationRaw),
+        fatherOrHusbandName:
+          (row['father_or_husband_name'] || row['fatherOrHusbandName'] || row['Father/Husband Name'] || row['తండ్రి పేరు / భర్త పేరు'] || '')
+            .toString()
+            .trim() || undefined,
+        age: ageRaw && !Number.isNaN(Number(ageRaw)) ? Number(ageRaw) : undefined,
+        gender: normalizeGender(genderRaw),
         recordStatus: 'unassigned' as const,
       });
       results.success++;
