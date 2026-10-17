@@ -5,7 +5,7 @@ import { RecordAssignment } from '../models/RecordAssignment';
 import { GeographicArea } from '../models/GeographicArea';
 import { AuthRequest } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
-import { IUser } from '../models/User';
+import { User, IUser } from '../models/User';
 import { logAudit } from '../utils/audit';
 import { parse } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
@@ -337,36 +337,82 @@ export async function assignRecord(req: AuthRequest, res: Response, next: NextFu
   }
 }
 
+// Assigns currently-unassigned voter records in a geographic area (a
+// "ward") to one Ward Member or Divisional Incharge in a single operation —
+// this is how a Mayor/Corporator/Divisional Incharge hands a whole ward to
+// the person who will walk it, instead of assigning voters one by one.
+// An optional `count` randomly samples that many unassigned records instead
+// of assigning the entire ward, so a large ward can be split into smaller
+// random batches across several people (e.g. 100 at a time).
 export async function bulkAssignRecords(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.user) throw new AppError('Authentication required', 401);
 
-    const { geographicAreaId, assignedUserId } = req.body;
+    const { geographicAreaId, assignedUserId, count } = req.body;
     if (!mongoose.Types.ObjectId.isValid(geographicAreaId)) throw new AppError('Invalid area ID', 400);
     if (!mongoose.Types.ObjectId.isValid(assignedUserId)) throw new AppError('Invalid user ID', 400);
 
-    const records = await VoterRecord.find({
-      geographicAreaId,
-      recordStatus: 'unassigned',
-    });
-
-    let assigned = 0;
-    for (const record of records) {
-      await RecordAssignment.create({
-        voterRecordId: record._id,
-        assignedUserId,
-        assignedBy: req.user._id,
-        assignmentStatus: 'active',
-        assignedAt: new Date(),
-      });
-      record.recordStatus = 'assigned';
-      await record.save();
-      assigned++;
+    let sampleSize: number | undefined;
+    if (count !== undefined && count !== null && count !== '') {
+      sampleSize = Number(count);
+      if (!Number.isInteger(sampleSize) || sampleSize <= 0) throw new AppError('Count must be a positive whole number', 400);
     }
 
-    await logAudit(req.user._id, 'BULK_ASSIGN_RECORDS', 'VoterRecord', undefined, { geographicAreaId, assignedUserId, count: assigned });
+    const area = await GeographicArea.findOne({ _id: geographicAreaId, partyId: req.user.partyId });
+    if (!area) throw new AppError('Geographic area not found', 404);
+    if (req.user.role === 'DIVISIONAL_INCHARGE' && req.user.assignedScopeIds.length > 0) {
+      const inScope = req.user.assignedScopeIds.some((id) => id.toString() === geographicAreaId);
+      if (!inScope) throw new AppError('This area is outside your assigned scope', 403);
+    }
 
-    res.json({ success: true, assigned });
+    const targetUser = await User.findOne({ _id: assignedUserId, partyId: req.user.partyId });
+    if (!targetUser) throw new AppError('User not found', 404);
+    if (!['WARD_MEMBER', 'DIVISIONAL_INCHARGE'].includes(targetUser.role)) {
+      throw new AppError('Can only bulk-assign a ward to a Ward Member or Divisional Incharge', 400);
+    }
+    if (targetUser.status !== 'active') throw new AppError('Cannot assign to a suspended user', 400);
+
+    const records = sampleSize
+      ? await VoterRecord.aggregate([
+          { $match: { geographicAreaId: new mongoose.Types.ObjectId(geographicAreaId), recordStatus: 'unassigned' } },
+          { $sample: { size: sampleSize } },
+          { $project: { _id: 1 } },
+        ])
+      : await VoterRecord.find({ geographicAreaId, recordStatus: 'unassigned' }).select('_id');
+
+    if (records.length === 0) {
+      res.json({ success: true, assigned: 0 });
+      return;
+    }
+
+    const now = new Date();
+    const createdAssignments = await RecordAssignment.insertMany(
+      records.map((r) => ({
+        voterRecordId: r._id,
+        assignedUserId,
+        assignedBy: req.user!._id,
+        assignmentStatus: 'active' as const,
+        assignedAt: now,
+      }))
+    );
+
+    await VoterRecord.bulkWrite(
+      records.map((r, i) => ({
+        updateOne: {
+          filter: { _id: r._id },
+          update: { $set: { recordStatus: 'assigned', currentAssignmentId: createdAssignments[i]._id } },
+        },
+      }))
+    );
+
+    await logAudit(req.user._id, 'BULK_ASSIGN_RECORDS', 'VoterRecord', undefined, {
+      geographicAreaId,
+      assignedUserId,
+      requestedSampleSize: sampleSize,
+      count: records.length,
+    });
+
+    res.json({ success: true, assigned: records.length });
   } catch (err) {
     next(err);
   }
