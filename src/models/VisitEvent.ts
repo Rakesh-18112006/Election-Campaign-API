@@ -1,6 +1,10 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export type VisitStatus = 'visited' | 'not_visited' | 'correction';
+// person: the ward member spoke with the voter directly.
+// family: the voter was unavailable, so a family member was spoken to on
+// their behalf (relaying the household's likely voting intention).
+export type VisitType = 'person' | 'family';
 
 export interface IVisitEvent extends Document {
   _id: mongoose.Types.ObjectId;
@@ -9,6 +13,7 @@ export interface IVisitEvent extends Document {
   actorUserId: mongoose.Types.ObjectId;
   previousStatus: string;
   newStatus: VisitStatus;
+  visitType?: VisitType;
   latitude?: number;
   longitude?: number;
   accuracyMeters?: number;
@@ -25,6 +30,7 @@ const VisitEventSchema = new Schema<IVisitEvent>(
     actorUserId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     previousStatus: { type: String, required: true },
     newStatus: { type: String, enum: ['visited', 'not_visited', 'correction'], required: true },
+    visitType: { type: String, enum: ['person', 'family'] },
     latitude: { type: Number, min: -90, max: 90 },
     longitude: { type: Number, min: -180, max: 180 },
     accuracyMeters: { type: Number },

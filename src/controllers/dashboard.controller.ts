@@ -7,6 +7,7 @@ import { Party } from '../models/Party';
 import { GeographicArea } from '../models/GeographicArea';
 import { RecordAssignment } from '../models/RecordAssignment';
 import { AuditLog } from '../models/AuditLog';
+import { VisitEvent } from '../models/VisitEvent';
 import { AuthRequest } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { rolesBelow } from '../utils/roles';
@@ -192,6 +193,61 @@ export async function getAreaStats(req: AuthRequest, res: Response, next: NextFu
       success: true,
       stats: { total, visited, notVisited, assigned, unassigned, memberStats },
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GPS-tagged visit locations for the "Map View" dashboard toggle (Mayor /
+// Corporator only): lets them visually spot-check that the coordinates
+// ward members tagged during visits actually look right (e.g. clustered
+// near the ward, not scattered across the map or stacked on one spot).
+export async function getVisitLocations(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) throw new AppError('Authentication required', 401);
+    if (!['MAYOR', 'CORPORATOR'].includes(req.user.role)) {
+      throw new AppError('Only Mayor or Corporator can view the visit location map', 403);
+    }
+
+    const { campaignId } = req.query;
+    const match: Record<string, unknown> = {
+      newStatus: 'visited',
+      latitude: { $exists: true, $ne: null },
+      longitude: { $exists: true, $ne: null },
+    };
+    if (campaignId && mongoose.Types.ObjectId.isValid(campaignId as string)) {
+      match.campaignId = new mongoose.Types.ObjectId(campaignId as string);
+    }
+
+    const locations = await VisitEvent.aggregate([
+      { $match: match },
+      { $lookup: { from: 'voterrecords', localField: 'voterRecordId', foreignField: '_id', as: 'record' } },
+      { $unwind: '$record' },
+      { $match: { 'record.partyId': req.user.partyId } },
+      { $lookup: { from: 'users', localField: 'actorUserId', foreignField: '_id', as: 'actor' } },
+      { $unwind: '$actor' },
+      { $lookup: { from: 'geographicareas', localField: 'record.geographicAreaId', foreignField: '_id', as: 'area' } },
+      { $unwind: { path: '$area', preserveNullAndEmptyArrays: true } },
+      { $sort: { receivedAt: -1 } },
+      { $limit: 1000 },
+      {
+        $project: {
+          _id: 1,
+          latitude: 1,
+          longitude: 1,
+          accuracyMeters: 1,
+          visitType: 1,
+          receivedAt: 1,
+          voterRecordId: '$record._id',
+          voterName: '$record.name',
+          areaName: '$area.name',
+          actorName: '$actor.name',
+          actorUsername: '$actor.username',
+        },
+      },
+    ]);
+
+    res.json({ success: true, locations });
   } catch (err) {
     next(err);
   }

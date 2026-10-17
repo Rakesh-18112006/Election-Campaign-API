@@ -25,7 +25,7 @@ export async function submitVisit(req: AuthRequest, res: Response, next: NextFun
       if (!assignment) throw new AppError('Record not assigned to you', 403);
     }
 
-    const { status, latitude, longitude, accuracyMeters, capturedAt, correctionReason } = req.body;
+    const { status, visitType, latitude, longitude, accuracyMeters, capturedAt, correctionReason } = req.body;
 
     if (!['visited', 'not_visited', 'correction'].includes(status)) {
       throw new AppError('Invalid visit status', 400);
@@ -35,6 +35,9 @@ export async function submitVisit(req: AuthRequest, res: Response, next: NextFun
       if (latitude !== undefined || longitude !== undefined) {
         if (latitude < -90 || latitude > 90) throw new AppError('Invalid latitude', 400);
         if (longitude < -180 || longitude > 180) throw new AppError('Invalid longitude', 400);
+      }
+      if (visitType !== undefined && !['person', 'family'].includes(visitType)) {
+        throw new AppError('Invalid visit type', 400);
       }
     }
 
@@ -46,6 +49,7 @@ export async function submitVisit(req: AuthRequest, res: Response, next: NextFun
       actorUserId: req.user._id,
       previousStatus,
       newStatus: status,
+      visitType: status === 'visited' ? visitType : undefined,
       latitude: status === 'visited' ? latitude : undefined,
       longitude: status === 'visited' ? longitude : undefined,
       accuracyMeters: status === 'visited' ? accuracyMeters : undefined,
